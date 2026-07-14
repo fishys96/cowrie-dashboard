@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cowrie Attack Dashboard</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-left">
+    <span class="brand">🛰 COWRIE ATTACK DASHBOARD</span>
+    <span class="honeypot-label" id="honeypot-label">—</span>
+  </div>
+  <div class="topbar-right">
+    <div class="stat">
+      <span class="stat-value" id="stat-total">0</span>
+      <span class="stat-label">total events</span>
+    </div>
+    <div class="stat">
+      <span class="stat-value" id="stat-per-min">0</span>
+      <span class="stat-label">events / min</span>
+    </div>
+    <div class="stat">
+      <span class="stat-value" id="stat-attackers">0</span>
+      <span class="stat-label">unique attackers</span>
+    </div>
+    <div class="ws-status" id="ws-status">
+      <span class="ws-dot" id="ws-dot"></span>
+      <span id="ws-text">connecting…</span>
+    </div>
+  </div>
+</header>
+
+<main class="grid">
+
+  <section class="panel panel-globe" id="panel-globe">
+    <div class="panel-header">
+      <h2>Live Attack Map</h2>
+      <div class="legend" id="globe-legend"></div>
+    </div>
+    <div id="globe-container"></div>
+  </section>
+
+  <section class="panel panel-feed">
+    <div class="panel-header"><h2>Live Event Feed</h2></div>
+    <div class="feed-list" id="feed-list"></div>
+  </section>
+
+  <section class="panel panel-timeline">
+    <div class="panel-header"><h2>Attack Timeline — last 24h</h2></div>
+    <div class="chart-wrap"><canvas id="timeline-chart"></canvas></div>
+  </section>
+
+  <section class="panel panel-attackers">
+    <div class="panel-header"><h2>Top Attackers</h2></div>
+    <div class="table-wrap">
+      <table class="data-table" id="attackers-table">
+        <thead>
+          <tr><th>#</th><th>IP</th><th>Country</th><th>ISP / ASN</th><th>Type</th><th>Hits</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel panel-credentials">
+    <div class="panel-header"><h2>Top Credentials</h2></div>
+    <div class="chart-wrap chart-wrap-bar"><canvas id="credentials-chart"></canvas></div>
+  </section>
+
+  <section class="panel panel-commands">
+    <div class="panel-header"><h2>Command Activity</h2></div>
+    <div class="word-cloud" id="command-cloud"></div>
+  </section>
+
+  <section class="panel panel-geo">
+    <div class="panel-header"><h2>Geo Breakdown</h2></div>
+    <div class="geo-list" id="geo-list"></div>
+  </section>
+
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/globe.gl"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
