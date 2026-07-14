@@ -38,6 +38,7 @@ function escapeHtml(str) {
 }
 
 function truncate(s, n) {
+  s = String(s ?? "");
   return s.length > n ? s.slice(0, n) + "…" : s;
 }
 
@@ -49,6 +50,18 @@ function flagEmoji(countryCode) {
   if (!countryCode || countryCode.length !== 2) return "";
   const codePoints = [...countryCode.toUpperCase()].map((c) => 127397 + c.charCodeAt(0));
   return String.fromCodePoint(...codePoints);
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d)) return "—";
+  return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+function ispLabel(geo) {
+  if (!geo || !geo.as_org) return "";
+  return geo.asn ? `AS${geo.asn} ${geo.as_org}` : geo.as_org;
 }
 
 /* ---------- state ---------- */
@@ -79,22 +92,26 @@ function initGlobe() {
     .arcDashGap(0.15)
     .arcDashInitialGap(() => Math.random())
     .arcDashAnimateTime(1500)
-    .arcStroke(0.5)
-    .arcAltitudeAutoScale(0.35)
+    .arcStroke(0.6)
+    .arcAltitudeAutoScale(0.4)
     .arcsTransitionDuration(0)
     .pointColor("color")
     .pointAltitude(0.005)
-    .pointRadius((d) => (d.isHoneypot ? 0.6 : 0.32))
+    .pointRadius((d) => (d.isHoneypot ? 0.6 : 0.3))
     .pointsMerge(false)
     .ringColor(() => (t) => `rgba(255,255,255,${1 - t})`)
     .ringMaxRadius(3.2)
     .ringPropagationSpeed(2.2)
     .ringRepeatPeriod(1400);
 
+  // Render at the display's native resolution (capped) so the globe + textures look crisp
+  // on HiDPI screens instead of the default soft upscaling.
+  world.renderer().setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
   world.controls().autoRotate = true;
   world.controls().autoRotateSpeed = 0.3;
 
-  // The container can measure 0x0 on the very first synchronous read (grid layout not yet
+  // The container can measure 0x0 on the very first synchronous read (layout not yet
   // settled), so re-measure on the next frame too, not just once at construction time.
   const resize = () => {
     world.width(container.clientWidth);
@@ -264,29 +281,34 @@ function renderCredentials(list) {
 
 /* ---------- panel renderers ---------- */
 
-function renderAttackers(list) {
-  const tbody = document.querySelector("#attackers-table tbody");
+function renderAttackerList(list) {
+  const container = document.getElementById("attacker-list");
   if (!list.length) {
-    tbody.innerHTML = `<tr><td colspan="6" class="empty-state">No attackers yet</td></tr>`;
+    container.innerHTML = `<div class="empty-state">No attackers yet</div>`;
     return;
   }
-  tbody.innerHTML = list
+  const max = list[0].count || 1;
+  container.innerHTML = list
     .map((a, i) => {
-      const flag = flagEmoji(a.geo?.country_code);
-      const country = escapeHtml(a.geo?.country || "Unknown");
-      const isp = a.geo?.as_org
-        ? escapeHtml(a.geo.asn ? `AS${a.geo.asn} ${a.geo.as_org}` : a.geo.as_org)
-        : "—";
+      const g = a.geo || {};
+      const flag = flagEmoji(g.country_code);
+      const country = escapeHtml(g.country || "Unknown");
+      const isp = escapeHtml(ispLabel(g));
+      const meta = [country, isp].filter(Boolean).join(" · ") || "—";
       const type = a.top_attack_type || "other";
-      const typeLabel = TYPE_LABELS[type] || type;
-      return `<tr>
-        <td>${i + 1}</td>
-        <td class="ip-cell">${escapeHtml(a.ip)}</td>
-        <td>${flag ? flag + " " : ""}${country}</td>
-        <td>${isp}</td>
-        <td><span class="type-badge" style="background:${TYPE_COLORS[type] || TYPE_COLORS.other}">${escapeHtml(typeLabel)}</span></td>
-        <td>${a.count.toLocaleString()}</td>
-      </tr>`;
+      const color = TYPE_COLORS[type] || TYPE_COLORS.other;
+      const pct = Math.max(6, (a.count / max) * 100).toFixed(0);
+      return `<div class="attacker-row" data-ip="${escapeHtml(a.ip)}">
+        <span class="attacker-rank">${i + 1}</span>
+        <span class="attacker-main">
+          <div class="attacker-ip">${flag ? flag + " " : ""}${escapeHtml(a.ip)}</div>
+          <div class="attacker-meta">${meta}</div>
+        </span>
+        <span class="attacker-right">
+          <span class="attacker-count">${a.count.toLocaleString()}</span>
+          <span class="attacker-bar-track"><span class="attacker-bar-fill" style="width:${pct}%;background:${color}"></span></span>
+        </span>
+      </div>`;
     })
     .join("");
 }
@@ -305,7 +327,7 @@ function renderCommands(list) {
       const scale = max === min ? 0.5 : (c.count - min) / (max - min);
       const size = (12 + scale * 14).toFixed(1);
       const label = truncate(c.command, 70);
-      return `<span class="word-cloud-item" style="font-size:${size}px" title="${escapeHtml(c.command)}">${escapeHtml(label)}<span class="count">${c.count}</span></span>`;
+      return `<span class="word-cloud-item" data-command="${escapeHtml(c.command)}" style="font-size:${size}px" title="Search: ${escapeHtml(c.command)}">${escapeHtml(label)}<span class="count">${c.count}</span></span>`;
     })
     .join("");
 }
@@ -348,7 +370,7 @@ function feedDetailHtml(ev) {
 function feedRowHtml(ev) {
   const time = new Date(ev.timestamp).toLocaleTimeString([], { hour12: false });
   const flag = flagEmoji(ev.country_code);
-  return `<div class="feed-row">
+  return `<div class="feed-row" data-ip="${escapeHtml(ev.src_ip)}">
     <span class="feed-time">${time}</span>
     <span class="feed-dot" style="background:${ev.color}"></span>
     <span class="feed-body">
@@ -366,6 +388,171 @@ function prependFeed(ev) {
   while (list.children.length > FEED_LIMIT) {
     list.removeChild(list.lastChild);
   }
+}
+
+/* ---------- investigation drawer ---------- */
+
+const drawerEl = document.getElementById("drawer");
+const drawerScrim = document.getElementById("drawer-scrim");
+const drawerTitle = document.getElementById("drawer-title");
+const drawerBody = document.getElementById("drawer-body");
+
+function openDrawer() {
+  drawerEl.classList.add("open");
+  drawerEl.setAttribute("aria-hidden", "false");
+  drawerScrim.classList.add("open");
+}
+
+function closeDrawer() {
+  drawerEl.classList.remove("open");
+  drawerEl.setAttribute("aria-hidden", "true");
+  drawerScrim.classList.remove("open");
+}
+
+async function openAttackerDrawer(ip) {
+  openDrawer();
+  drawerTitle.textContent = ip;
+  drawerBody.innerHTML = `<div class="drawer-loading">Loading…</div>`;
+  try {
+    const res = await fetch(`/api/attacker/${encodeURIComponent(ip)}`);
+    if (!res.ok) throw new Error(res.status);
+    drawerBody.innerHTML = renderAttackerDetail(await res.json());
+  } catch {
+    drawerBody.innerHTML = `<div class="drawer-empty">No details available for this IP.</div>`;
+  }
+}
+
+function renderAttackerDetail(a) {
+  const g = a.geo || {};
+  const flag = flagEmoji(g.country_code);
+  const geoKv = `
+    <div class="drawer-kv"><span class="k">Country</span><span class="v">${flag ? flag + " " : ""}${escapeHtml(g.country || "Unknown")}</span></div>
+    <div class="drawer-kv"><span class="k">City</span><span class="v">${escapeHtml(g.city || "—")}</span></div>
+    <div class="drawer-kv"><span class="k">ISP / ASN</span><span class="v">${escapeHtml(ispLabel(g) || "—")}</span></div>
+    <div class="drawer-kv"><span class="k">Events</span><span class="v">${(a.count || 0).toLocaleString()}</span></div>
+    <div class="drawer-kv"><span class="k">First seen</span><span class="v">${fmtDateTime(a.first_seen)}</span></div>
+    <div class="drawer-kv"><span class="k">Last seen</span><span class="v">${fmtDateTime(a.last_seen)}</span></div>`;
+
+  const chips = (a.type_breakdown || [])
+    .map(
+      (t) =>
+        `<span class="type-chip"><span class="dot" style="background:${TYPE_COLORS[t.attack_type] || TYPE_COLORS.other}"></span>${escapeHtml(TYPE_LABELS[t.attack_type] || t.attack_type)} · ${t.count}</span>`
+    )
+    .join("");
+
+  const commands = (a.commands || []).length
+    ? a.commands
+        .map((c) => `<div class="drawer-list-row"><span class="label" title="${escapeHtml(c.command)}">${escapeHtml(c.command)}</span><span class="num">${c.count}</span></div>`)
+        .join("")
+    : `<div class="drawer-empty">No commands run (never obtained a shell).</div>`;
+
+  const creds = (a.credentials || []).length
+    ? a.credentials
+        .map(
+          (c) =>
+            `<div class="drawer-list-row"><span class="label">${escapeHtml(c.username || "(blank)")} / ${escapeHtml(c.password || "(blank)")}</span><span class="num">${c.count}</span></div>`
+        )
+        .join("")
+    : `<div class="drawer-empty">No login attempts recorded.</div>`;
+
+  return `
+    <div class="drawer-section"><h3>Origin</h3>${geoKv}</div>
+    <div class="drawer-section"><h3>Activity</h3><div class="type-chips">${chips || '<span class="drawer-empty">—</span>'}</div></div>
+    <div class="drawer-section"><h3>Commands run (${(a.commands || []).length})</h3>${commands}</div>
+    <div class="drawer-section"><h3>Credentials tried (${(a.credentials || []).length})</h3>${creds}</div>`;
+}
+
+async function openCommandDrawer(query) {
+  openDrawer();
+  drawerTitle.textContent = `Search: "${truncate(query, 40)}"`;
+  drawerBody.innerHTML = `<div class="drawer-loading">Searching…</div>`;
+  try {
+    const res = await fetch(`/api/commands/search?q=${encodeURIComponent(query)}`);
+    drawerBody.innerHTML = renderCommandSearch(await res.json());
+  } catch {
+    drawerBody.innerHTML = `<div class="drawer-empty">Search failed.</div>`;
+  }
+}
+
+function renderCommandSearch(data) {
+  if (!data.attackers || !data.attackers.length) {
+    return `<div class="drawer-empty">No attacker ran a command matching "${escapeHtml(data.query)}".</div>`;
+  }
+  const summary = `<div class="drawer-section">
+    <div class="drawer-kv"><span class="k">Attackers</span><span class="v">${data.attackers.length.toLocaleString()}</span></div>
+    <div class="drawer-kv"><span class="k">Total runs</span><span class="v">${data.total_matches.toLocaleString()}</span></div>
+  </div>`;
+
+  const rows = data.attackers
+    .map((a) => {
+      const g = a.geo || {};
+      const flag = flagEmoji(g.country_code);
+      const cmds = a.commands
+        .map((c) => `<div class="mono" style="color:var(--text-muted);font-size:11px">${escapeHtml(truncate(c.command, 58))} <span style="color:var(--text-secondary)">×${c.count}</span></div>`)
+        .join("");
+      return `<div class="drawer-list-row drawer-attacker-row" data-ip="${escapeHtml(a.ip)}">
+        <span class="label"><span class="mono" style="color:var(--text-primary)">${flag ? flag + " " : ""}${escapeHtml(a.ip)}</span>${cmds}</span>
+        <span class="num">${a.match_count}</span>
+      </div>`;
+    })
+    .join("");
+
+  return summary + `<div class="drawer-section"><h3>Attackers who ran it (click to drill in)</h3>${rows}</div>`;
+}
+
+/* ---------- events / wiring ---------- */
+
+function wireInteractions() {
+  // Attacker rows, feed rows -> attacker drawer (event delegation)
+  document.getElementById("attacker-list").addEventListener("click", (e) => {
+    const row = e.target.closest("[data-ip]");
+    if (row) openAttackerDrawer(row.dataset.ip);
+  });
+  document.getElementById("feed-list").addEventListener("click", (e) => {
+    const row = e.target.closest("[data-ip]");
+    if (row) openAttackerDrawer(row.dataset.ip);
+  });
+
+  // Command cloud -> command search drawer
+  document.getElementById("command-cloud").addEventListener("click", (e) => {
+    const item = e.target.closest("[data-command]");
+    if (item) openCommandDrawer(item.dataset.command);
+  });
+
+  // Command-search results -> click an attacker to switch into attacker mode (bidirectional)
+  drawerBody.addEventListener("click", (e) => {
+    const row = e.target.closest(".drawer-attacker-row[data-ip]");
+    if (row) openAttackerDrawer(row.dataset.ip);
+  });
+
+  // Drawer close affordances
+  document.getElementById("drawer-close").addEventListener("click", closeDrawer);
+  drawerScrim.addEventListener("click", closeDrawer);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeDrawer();
+  });
+
+  // Search bar (debounced) + Enter for immediate search
+  const searchInput = document.getElementById("search-input");
+  let searchTimer = null;
+  searchInput.addEventListener("input", () => {
+    clearTimeout(searchTimer);
+    const q = searchInput.value.trim();
+    if (q.length < 2) return;
+    searchTimer = setTimeout(() => openCommandDrawer(q), 250);
+  });
+  searchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      clearTimeout(searchTimer);
+      const q = searchInput.value.trim();
+      if (q) openCommandDrawer(q);
+    }
+  });
+
+  // Scroll cue -> analytics
+  document.getElementById("scroll-cue").addEventListener("click", () => {
+    document.getElementById("analytics").scrollIntoView({ behavior: "smooth" });
+  });
 }
 
 /* ---------- websocket ---------- */
@@ -410,7 +597,7 @@ function handleStats(stats) {
   const lastBucket = stats.timeline[stats.timeline.length - 1];
   document.getElementById("stat-per-min").textContent = lastBucket ? lastBucket.count : 0;
 
-  renderAttackers(stats.top_attackers);
+  renderAttackerList(stats.top_attackers);
   renderCredentials(stats.top_credentials);
   renderCommands(stats.top_commands);
   renderGeo(stats.top_countries);
@@ -444,6 +631,7 @@ async function init() {
   initGlobe();
   initCharts();
   renderLegend();
+  wireInteractions();
 
   const snapshot = await fetch("/api/snapshot").then((r) => r.json());
   await applySnapshot(snapshot);

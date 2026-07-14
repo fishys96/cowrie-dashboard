@@ -4,7 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -82,6 +82,19 @@ async def index() -> FileResponse:
 @app.get("/api/snapshot")
 async def snapshot() -> dict:
     return store.get_snapshot()
+
+
+@app.get("/api/attacker/{ip}")
+async def attacker_detail(ip: str) -> dict:
+    detail = store.get_attacker_detail(ip)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Unknown attacker IP")
+    return detail
+
+
+@app.get("/api/commands/search")
+async def command_search(q: str = "") -> dict:
+    return store.search_commands(q)
 
 
 @app.websocket("/ws")

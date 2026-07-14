@@ -206,3 +206,92 @@ def get_snapshot() -> dict:
         }
         snapshot["feed"] = list(feed)[::-1]
         return snapshot
+
+
+def get_attacker_detail(ip: str) -> Optional[dict]:
+    """Everything about one source IP: geo/ASN, every command it ran, credentials tried,
+    per-type breakdown, and first/last seen. Backs the drill-down drawer."""
+    with _lock:
+        stats = attacker_stats.get(ip)
+
+        cur = _conn.execute(
+            "SELECT command, COUNT(*) AS n FROM events "
+            "WHERE src_ip = ? AND command IS NOT NULL AND command != '' "
+            "GROUP BY command ORDER BY n DESC",
+            (ip,),
+        )
+        commands = [{"command": c, "count": n} for c, n in cur.fetchall()]
+
+        cur = _conn.execute(
+            "SELECT username, password, COUNT(*) AS n FROM events "
+            "WHERE src_ip = ? AND eventid IN ('cowrie.login.failed', 'cowrie.login.success') "
+            "GROUP BY username, password ORDER BY n DESC LIMIT 100",
+            (ip,),
+        )
+        credentials = [
+            {"username": u or "", "password": p or "", "count": n} for u, p, n in cur.fetchall()
+        ]
+
+        cur = _conn.execute(
+            "SELECT attack_type, COUNT(*) AS n FROM events WHERE src_ip = ? GROUP BY attack_type ORDER BY n DESC",
+            (ip,),
+        )
+        type_breakdown = [{"attack_type": t, "count": n} for t, n in cur.fetchall()]
+
+        cur = _conn.execute(
+            "SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM events WHERE src_ip = ?",
+            (ip,),
+        )
+        total, first_seen, last_seen = cur.fetchone()
+
+        if not total and stats is None:
+            return None
+
+        return {
+            "ip": ip,
+            "count": total or (stats["count"] if stats else 0),
+            "first_seen": first_seen or (stats["first_seen"] if stats else None),
+            "last_seen": last_seen or (stats.get("last_seen") if stats else None),
+            "geo": stats["geo"] if stats else {},
+            "commands": commands,
+            "credentials": credentials,
+            "type_breakdown": type_breakdown,
+        }
+
+
+def search_commands(query: str) -> dict:
+    """Cross-attacker command search: every IP that ran a command matching `query`,
+    ranked by match count, each with the specific matching commands. Backs the search bar."""
+    query = (query or "").strip()
+    if not query:
+        return {"query": query, "attackers": [], "total_matches": 0}
+
+    like = f"%{query}%"
+    with _lock:
+        cur = _conn.execute(
+            "SELECT src_ip, command, COUNT(*) AS n FROM events "
+            "WHERE command LIKE ? AND command IS NOT NULL AND command != '' "
+            "GROUP BY src_ip, command ORDER BY n DESC",
+            (like,),
+        )
+        rows = cur.fetchall()
+
+        by_ip: dict[str, dict] = {}
+        total_matches = 0
+        for src_ip, command, n in rows:
+            total_matches += n
+            entry = by_ip.get(src_ip)
+            if entry is None:
+                stats = attacker_stats.get(src_ip)
+                entry = {
+                    "ip": src_ip,
+                    "match_count": 0,
+                    "commands": [],
+                    "geo": stats["geo"] if stats else {},
+                }
+                by_ip[src_ip] = entry
+            entry["match_count"] += n
+            entry["commands"].append({"command": command, "count": n})
+
+    attackers = sorted(by_ip.values(), key=lambda e: e["match_count"], reverse=True)
+    return {"query": query, "attackers": attackers, "total_matches": total_matches}

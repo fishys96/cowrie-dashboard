@@ -13,6 +13,11 @@
     <span class="brand">🛰 COWRIE ATTACK DASHBOARD</span>
     <span class="honeypot-label" id="honeypot-label">—</span>
   </div>
+
+  <div class="topbar-search">
+    <input type="search" id="search-input" placeholder="Search commands across all attackers…  (e.g. wget, uname)" autocomplete="off" />
+  </div>
+
   <div class="topbar-right">
     <div class="stat">
       <span class="stat-value" id="stat-total">0</span>
@@ -33,15 +38,18 @@
   </div>
 </header>
 
-<main class="grid">
+<!-- Full-viewport hero: the globe is the star on load -->
+<section id="hero">
+  <div id="globe-container"></div>
+  <div class="legend" id="globe-legend"></div>
+  <button class="scroll-cue" id="scroll-cue" title="Scroll to analytics">
+    <span>ANALYTICS</span>
+    <span class="chevron">▼</span>
+  </button>
+</section>
 
-  <section class="panel panel-globe" id="panel-globe">
-    <div class="panel-header">
-      <h2>Live Attack Map</h2>
-      <div class="legend" id="globe-legend"></div>
-    </div>
-    <div id="globe-container"></div>
-  </section>
+<!-- Analytics live below the fold -->
+<main id="analytics" class="grid">
 
   <section class="panel panel-feed">
     <div class="panel-header"><h2>Live Event Feed</h2></div>
@@ -54,15 +62,11 @@
   </section>
 
   <section class="panel panel-attackers">
-    <div class="panel-header"><h2>Top Attackers</h2></div>
-    <div class="table-wrap">
-      <table class="data-table" id="attackers-table">
-        <thead>
-          <tr><th>#</th><th>IP</th><th>Country</th><th>ISP / ASN</th><th>Type</th><th>Hits</th></tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+    <div class="panel-header">
+      <h2>Top Attackers</h2>
+      <span class="panel-hint">click to investigate</span>
     </div>
+    <div class="attacker-list" id="attacker-list"></div>
   </section>
 
   <section class="panel panel-credentials">
@@ -81,6 +85,16 @@
   </section>
 
 </main>
+
+<!-- Slide-in investigation drawer (attacker detail + command search results) -->
+<div class="drawer-scrim" id="drawer-scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="drawer-header">
+    <div class="drawer-title" id="drawer-title">Details</div>
+    <button class="drawer-close" id="drawer-close" title="Close">✕</button>
+  </div>
+  <div class="drawer-body" id="drawer-body"></div>
+</aside>
 
 <script src="https://cdn.jsdelivr.net/npm/globe.gl"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
