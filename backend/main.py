@@ -57,10 +57,22 @@ async def _stats_broadcaster() -> None:
         await manager.broadcast({"type": "stats", "data": store.get_stats()})
 
 
+async def _on_caught_up() -> None:
+    store.end_catchup()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     store.init_db()
-    tail_task = asyncio.create_task(tailer.run(settings.cowrie_log_path, settings.poll_interval, _on_log_line))
+    tail_task = asyncio.create_task(
+        tailer.run(
+            settings.cowrie_log_path,
+            settings.poll_interval,
+            _on_log_line,
+            on_caught_up=_on_caught_up,
+            from_start=settings.replay_on_start,
+        )
+    )
     stats_task = asyncio.create_task(_stats_broadcaster())
     logger.info("Dashboard started, tailing %s", settings.cowrie_log_path)
     try:

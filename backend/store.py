@@ -29,6 +29,11 @@ country_names: dict[str, str] = {}
 timeline: dict[str, int] = {}
 total_events = 0
 
+# During startup catch-up the tailer replays the whole current log; these guard against
+# re-ingesting events already persisted before the last shutdown (avoids duplicates).
+_catchup_active = False
+_catchup_max_ts: Optional[str] = None
+
 _EVENT_COLUMNS = (
     "timestamp", "eventid", "attack_type", "color", "src_ip", "session", "protocol", "dst_port",
     "username", "password", "command", "url", "lat", "lon", "city", "country", "country_code",
@@ -57,6 +62,26 @@ def init_db() -> None:
 
     if settings.replay_on_start:
         _rebuild_aggregates()
+        _begin_catchup()
+
+
+def _begin_catchup() -> None:
+    """Arm the dedup guard: remember the newest already-stored event so the tailer's replay of
+    the current log skips everything up to it and only ingests the downtime gap."""
+    global _catchup_active, _catchup_max_ts
+    row = _conn.execute("SELECT MAX(timestamp) FROM events").fetchone()
+    _catchup_max_ts = row[0] if row else None
+    _catchup_active = True
+    logger.info("Catch-up armed (newest stored event: %s)", _catchup_max_ts or "none")
+
+
+def end_catchup() -> None:
+    """Called once the tailer has drained the pre-existing backlog: from here on every line is
+    live and ingested without timestamp filtering."""
+    global _catchup_active
+    if _catchup_active:
+        _catchup_active = False
+        logger.info("Backlog catch-up complete; now live")
 
 
 def _rebuild_aggregates() -> None:
@@ -141,6 +166,11 @@ def _persist_event(event: dict) -> None:
 async def ingest_line(raw_line: str) -> Optional[dict]:
     event = parser.parse_line(raw_line)
     if event is None:
+        return None
+
+    # During catch-up, skip events already persisted before the last shutdown. Live events (after
+    # end_catchup) are never filtered, so out-of-order writes are still ingested.
+    if _catchup_active and _catchup_max_ts is not None and event["timestamp"] <= _catchup_max_ts:
         return None
 
     geo_data = geo.lookup(event["src_ip"])
