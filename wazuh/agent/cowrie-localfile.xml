@@ -1,0 +1,18 @@
+<!--
+  Appended to /var/ossec/etc/ossec.conf on the COWRIE VM by agent/install-agent.sh.
+
+  <log_format>json</log_format> is what makes the whole pipeline work without a
+  custom decoder: it routes each line through Wazuh's built-in JSON decoder, which
+  exposes every Cowrie key (eventid, src_ip, username, password, session, input,
+  url) as a dynamic field that rules can match on with <field name="...">.
+
+  The <location> is substituted at install time from COWRIE_LOG_PATH; the script
+  refuses to write this block until it has confirmed the file exists and is readable
+  by root.
+-->
+<ossec_config>
+  <localfile>
+    <log_format>json</log_format>
+    <location>__COWRIE_LOG_PATH__</location>
+  </localfile>
+</ossec_config>

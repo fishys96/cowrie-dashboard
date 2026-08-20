@@ -1,0 +1,24 @@
+<!--
+  Applied by scripts/setup-manager.sh to wazuh-docker/single-node/config/wazuh_cluster/wazuh_manager.conf
+  (inserted inside the existing <global> block).
+
+  WHY: Wazuh only writes an event to alerts.json once a rule matches it. Before the
+  Cowrie rules exist - or if they are broken - the dashboard shows nothing, and
+  "nothing" is ambiguous: it could mean the agent isn't shipping, the decoder isn't
+  parsing, or the rules aren't matching.
+
+  <logall_json> writes EVERY received event to /var/ossec/logs/archives/archives.json
+  regardless of rule matches. That turns "no alerts" into a diagnosable state: if the
+  raw Cowrie events are in archives.json with populated data.* fields, ingestion and
+  decoding are fine and the problem is in the rules.
+
+  COST: archives.json grows fast on a honeypot. Turn it off once validation passes:
+
+      # in wazuh_manager.conf, set both to no, then:
+      docker compose restart wazuh.manager
+
+  Keep it on only if the retroactive-reporting project is coming up soon - it needs
+  the archived raw events.
+-->
+<logall>no</logall>
+<logall_json>yes</logall_json>

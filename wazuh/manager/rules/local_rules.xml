@@ -1,0 +1,175 @@
+<!--
+  Cowrie honeypot detection rules
+  ==============================================================================
+  Deployed to: /var/ossec/etc/rules/local_rules.xml  (read-only bind mount)
+  Source of truth is this file in git - see wazuh/README.md.
+
+  Decoding: none of these rules need a custom decoder. Cowrie writes flat JSON
+  and the agent ships it with <log_format>json</log_format>, so Wazuh's built-in
+  JSON decoder already exposes every key (eventid, src_ip, username, password,
+  session, input, url) as a dynamic field. Rules key off <decoded_as>json</decoded_as>
+  plus <field name="...">.
+
+  Rule ID block: 100200-100299 (custom rules must be >= 100000).
+
+  ORDERING MATTERS. Wazuh evaluates sibling rules in file order and stops at the
+  first match, so the command-classification rules are listed most-severe-first:
+  a `wget` that also clears history should alert as anti-forensics (100213), not
+  as plain payload staging (100212).
+-->
+<group name="cowrie,honeypot,">
+
+  <!--
+    100200 - BASE RULE. Level 0 on purpose.
+
+    A honeypot emits thousands of session.connect / login.failed events per day.
+    Alerting on all of them would bury the signal. Level 0 means "match but do
+    not alert" - the rule still parents every rule below it via <if_sid>, so the
+    tree works exactly as it would at any other level. This is deliberate tuning,
+    not an omission.
+
+    It is also the pipeline health check: if `wazuh-logtest` shows a Cowrie line
+    matching 100200, decoding and ingestion are working even when nothing alerts.
+  -->
+  <rule id="100200" level="0">
+    <decoded_as>json</decoded_as>
+    <field name="eventid" type="pcre2">^cowrie\.</field>
+    <description>Cowrie honeypot event (base rule - matches all, alerts on none)</description>
+  </rule>
+
+  <!-- ========================= session lifecycle ========================= -->
+
+  <rule id="100201" level="3">
+    <if_sid>100200</if_sid>
+    <field name="eventid" type="pcre2">^cowrie\.session\.connect$</field>
+    <description>Cowrie: new $(protocol) session from $(src_ip)</description>
+    <group>cowrie_session,</group>
+  </rule>
+
+  <!-- ============================ credentials ============================ -->
+
+  <rule id="100202" level="3">
+    <if_sid>100200</if_sid>
+    <field name="eventid" type="pcre2">^cowrie\.login\.failed$</field>
+    <description>Cowrie: failed login $(username)/$(password) from $(src_ip)</description>
+    <mitre>
+      <id>T1110</id>
+    </mitre>
+    <group>cowrie_auth,authentication_failed,</group>
+  </rule>
+
+  <!--
+    100203 - Severity is INVERTED relative to a production host. On a real server
+    a successful login is normal and a failure is the interesting event. On a
+    honeypot nobody has a legitimate reason to authenticate at all, so a success
+    means an attacker just cleared the front door and is about to run commands.
+  -->
+  <rule id="100203" level="10">
+    <if_sid>100200</if_sid>
+    <field name="eventid" type="pcre2">^cowrie\.login\.success$</field>
+    <description>Cowrie: SUCCESSFUL login $(username)/$(password) from $(src_ip) - attacker is now in the shell</description>
+    <mitre>
+      <id>T1078</id>
+    </mitre>
+    <group>cowrie_auth,authentication_success,</group>
+  </rule>
+
+  <!--
+    100210 - Brute force correlation.
+
+    Uses <same_field>src_ip</same_field>, NOT <same_srcip/>. The JSON decoder
+    produces a dynamic field literally named `src_ip`; Wazuh's built-in
+    correlation keyword <same_srcip/> looks at its own `srcip` field, which
+    Cowrie never populates. Getting this wrong fails silently - the rule would
+    still fire, but it would correlate failures from *different* attackers into
+    one alert. scripts/verify_rules.sh asserts this specifically.
+
+    Note: Wazuh's frequency counter fires on frequency+1 matches, so this alerts
+    at roughly the 9th failure within 120s. Threshold chosen from observed
+    traffic: real credential-stuffing bots on this sensor burst well above it,
+    while a human fat-fingering a password a few times does not.
+  -->
+  <rule id="100210" level="10" frequency="8" timeframe="120">
+    <if_matched_sid>100202</if_matched_sid>
+    <same_field>src_ip</same_field>
+    <description>Cowrie: SSH brute force - repeated failed logins from $(src_ip) within 120s</description>
+    <mitre>
+      <id>T1110.001</id>
+    </mitre>
+    <group>cowrie_auth,authentication_failures,brute_force,</group>
+  </rule>
+
+  <!-- ========================= command execution ========================= -->
+
+  <!--
+    100204 is the parent for all command classification. Any command at all is
+    post-compromise behaviour and rates level 8 on its own; the children below
+    escalate based on what the command actually does.
+  -->
+  <rule id="100204" level="8">
+    <if_sid>100200</if_sid>
+    <field name="eventid" type="pcre2">^cowrie\.command\.input$</field>
+    <description>Cowrie: command executed by $(src_ip) - $(input)</description>
+    <mitre>
+      <id>T1059.004</id>
+    </mitre>
+    <group>cowrie_command,</group>
+  </rule>
+
+  <!-- Most severe first - see the ORDERING note at the top of this file. -->
+
+  <rule id="100213" level="13">
+    <if_sid>100204</if_sid>
+    <field name="input" type="pcre2">(?i)history\s+-c|rm\s+-rf?\s+/var/log|\bchmod\s+(\+x|777)\s+/tmp/|\bcrontab\b|>\s*/etc/rc\.local|\.ssh/authorized_keys|\bunset\s+HISTFILE</field>
+    <description>Cowrie: anti-forensics or persistence attempt by $(src_ip) - $(input)</description>
+    <mitre>
+      <id>T1070.003</id>
+      <id>T1053</id>
+    </mitre>
+    <group>cowrie_command,anti_forensics,persistence,</group>
+  </rule>
+
+  <rule id="100212" level="12">
+    <if_sid>100204</if_sid>
+    <field name="input" type="pcre2">(?i)\b(wget|curl|tftp|ftpget)\b|busybox\s+(wget|tftp)</field>
+    <description>Cowrie: payload staging - download tool invoked by $(src_ip) - $(input)</description>
+    <mitre>
+      <id>T1105</id>
+    </mitre>
+    <group>cowrie_command,payload_staging,</group>
+  </rule>
+
+  <rule id="100211" level="12">
+    <if_sid>100204</if_sid>
+    <field name="input" type="pcre2">(?i)\buname\b|\bwhoami\b|\blscpu\b|\bnproc\b|\blspci\b|cat\s+/etc/(passwd|shadow|os-release|issue)|cat\s+/proc/(cpuinfo|meminfo)|\bfree\s+-[mgh]</field>
+    <description>Cowrie: host reconnaissance by $(src_ip) - $(input)</description>
+    <mitre>
+      <id>T1082</id>
+      <id>T1087</id>
+    </mitre>
+    <group>cowrie_command,reconnaissance,</group>
+  </rule>
+
+  <!-- ======================= file transfer / malware ===================== -->
+
+  <rule id="100205" level="12">
+    <if_sid>100200</if_sid>
+    <field name="eventid" type="pcre2">^cowrie\.session\.file_download$</field>
+    <description>Cowrie: attacker $(src_ip) pulled a file into the honeypot from $(url)</description>
+    <mitre>
+      <id>T1105</id>
+    </mitre>
+    <group>cowrie_malware,</group>
+  </rule>
+
+  <rule id="100206" level="12">
+    <if_sid>100200</if_sid>
+    <field name="eventid" type="pcre2">^cowrie\.session\.file_upload$</field>
+    <description>Cowrie: attacker $(src_ip) uploaded a file to the honeypot</description>
+    <mitre>
+      <id>T1105</id>
+    </mitre>
+    <group>cowrie_malware,</group>
+  </rule>
+
+</group>

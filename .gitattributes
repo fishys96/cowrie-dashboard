@@ -1,0 +1,9 @@
+# This repo is authored on Windows and deployed to Linux VMs by `git pull`.
+# A CRLF shebang produces `bad interpreter: /usr/bin/env bash^M` on the VM, so
+# anything executed remotely is pinned to LF regardless of local core.autocrlf.
+*.sh    text eol=lf
+*.py    text eol=lf
+*.xml   text eol=lf
+*.yml   text eol=lf
+*.json  text eol=lf
+*.jsonl text eol=lf

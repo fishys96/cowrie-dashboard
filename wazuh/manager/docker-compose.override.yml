@@ -1,0 +1,28 @@
+# Wazuh single-node overrides for the Cowrie SOC lab.
+#
+# Copied by scripts/setup-manager.sh into wazuh-docker/single-node/ alongside a
+# generated .env that supplies COWRIE_RULES_PATH. Docker Compose merges this with
+# the upstream docker-compose.yml automatically.
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# In the stock single-node stack, /var/ossec/etc is a *named volume*. Rules edited
+# there live only inside Docker: invisible to git, unreviewable, and gone the moment
+# the volume is recreated. Bind-mounting the rule file read-only makes detection
+# content infrastructure-as-code - it is versioned, diffable, and deployed by a
+# container restart.
+#
+# TRADE-OFF: the Wazuh dashboard's built-in rule editor can no longer save to this
+# file (it is :ro). That is intentional. Rules change through git, not through a
+# web form with no review and no history.
+
+services:
+  wazuh.manager:
+    volumes:
+      - ${COWRIE_RULES_PATH}:/var/ossec/etc/rules/local_rules.xml:ro
+
+  wazuh.indexer:
+    environment:
+      # The indexer will happily take half the box. Pinning the heap keeps the
+      # manager and dashboard alive on an 8 GiB VM. Raise this if you resize up.
+      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"

@@ -16,6 +16,13 @@ a 24h attack timeline, command activity, and a geo breakdown.
 
 New events appear on the globe and in every panel within ~2-3 seconds of hitting the log.
 
+## Detection layer
+
+The dashboard is passive telemetry -- it shows what the honeypot saw. [`wazuh/`](wazuh/) adds
+the detection half: a Wazuh manager on a **separate** VM, a custom rule set that classifies
+Cowrie activity by severity along the attacker's kill chain, and brute-force correlation.
+Start at [`wazuh/README.md`](wazuh/README.md).
+
 ## 1. Prerequisites
 
 - Python 3.10+
@@ -128,6 +135,11 @@ tools/
   simulate.py  Fake attack traffic generator for local testing
 deploy/
   cowrie-dashboard.service   systemd unit (+ optional nginx appendix)
+wazuh/
+  manager/     Wazuh rule set + Docker overrides for the SIEM VM
+  agent/       Wazuh agent install/enrollment for the honeypot VM
+  scripts/     stack setup, rule tests, end-to-end replay validation
+  docs/        Azure VM provisioning + NSG rules
 sample_cowrie.json           Example of real Cowrie event shapes
 ```
 
