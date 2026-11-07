@@ -7,3 +7,4 @@ data/*.db-*
 geoip/*.mmdb
 test_cowrie.json
 *.tgz
+reports/
